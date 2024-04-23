@@ -7,6 +7,9 @@ from requests_toolbelt import MultipartEncoder, MultipartEncoderMonitor
 from websocket import WebSocketApp
 from uuid import uuid4
 from threading import Thread
+import logging
+ 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # regex for extracting sign in link from mail sent by perplexity
 signin_regex = re.compile(r'"(https://www\.perplexity\.ai/api/auth/callback/email\?callbackUrl=.*?)"')
@@ -23,13 +26,15 @@ def case_fixer(headers):
 
 # client class for emailnator
 class Emailnator:
-    def __init__(self, headers, cookies, domain=False, plus=False, dot=True, google_mail=False):
+    def __init__(self, headers, cookies, domain=False, plus=False, dot=True, google_mail=False, use_proxy=False, proxies=None):
         # inbox_ads for exclude the advertisements when you create a new mail
         self.inbox = []
         self.inbox_ads = []
 
         # create session with provided headers & cookies
         self.s = requests.Session()
+        if use_proxy:
+            self.s.proxies = proxies
         self.s.headers.update(case_fixer(headers))
         self.s.cookies.update(cookies)
 
@@ -78,8 +83,10 @@ class Emailnator:
 
 # client class for interactions with perplexity ai webpage
 class Client:
-    def __init__(self, headers, cookies, own=False):
+    def __init__(self, headers, cookies, own=False, use_proxy=False, proxies=None):
         self.session = requests.Session()
+        if use_proxy:
+            self.session.proxies = proxies
         self.session.headers.update(case_fixer(headers))
         self.session.cookies.update(cookies)
 
@@ -117,7 +124,7 @@ class Client:
         while True:
             # sometimes mails from emailnator are out of order, we will pass and create a new one if it is
             try:
-                emailnator_cli = Emailnator(headers, cookies, dot=False, google_mail=True)
+                emailnator_cli = Emailnator(headers, cookies, dot=False, google_mail=True, use_proxy=self.use_proxy, proxies=self.proxies)
 
                 # send sign in link to email
                 resp = self.session.post('https://www.perplexity.ai/api/auth/signin/email', data={
@@ -500,7 +507,7 @@ class LabsClient:
 
 
 class Pool:
-    def __init__(self, perplexity_headers, perplexity_cookies, emailnator_headers, emailnator_cookies, copilots=10, file_uploads=5, threads=1):
+    def __init__(self, perplexity_headers, perplexity_cookies, emailnator_headers, emailnator_cookies, copilots=10, file_uploads=5, threads=1, use_proxy=False, proxies={}):
         self.perplexity_headers = perplexity_headers
         self.perplexity_cookies = perplexity_cookies
 
@@ -510,6 +517,9 @@ class Pool:
         self.copilots = copilots
         self.file_uploads = file_uploads
         self.accounts = []
+        
+        self.use_proxy = use_proxy
+        self.proxies = proxies
 
         for _ in range(threads):
             Thread(target=self.automation).start()
@@ -522,8 +532,8 @@ class Pool:
             current_file_uploads = sum([x.file_upload for x in self.accounts if x.copilot and x.file_upload])
 
             if not self.accounts or current_copilots < self.copilots or current_file_uploads < self.file_uploads:
-                new_account = Client(perplexity_headers, perplexity_cookies)
-                new_account.create_account(emailnator_headers, emailnator_cookies)
+                new_account = Client(self.perplexity_headers, self.perplexity_cookies, use_proxy=self.use_proxy, proxies=self.proxies)
+                new_account.create_account(self.emailnator_headers, self.emailnator_cookies)
 
                 self.accounts.append(new_account)
 
